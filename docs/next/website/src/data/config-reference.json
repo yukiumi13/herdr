@@ -840,6 +840,66 @@
           "description": "Expanded Space sidebar layout. Entries may be token strings or inline { token, fg, bold, dim } style tables. Supports built-in and $name metadata tokens; at most 16 rows and 16 tokens per row."
         },
         {
+          "key": "ui.sidebar.panel.command",
+          "type": "string",
+          "default": "\"\"",
+          "description": "Command whose stdout, including ANSI SGR colors, fills a sidebar section between Spaces and Agents. It runs every interval_seconds and again when the focused pane, the section size, zoom or drag changes, with COLUMNS and LINES set to the body size and HERDR_PANEL_ZOOM, HERDR_PANEL_DRAG_X and HERDR_PANEL_DRAG_Y to the view. After a failed run the body keeps the previous output and the title shows stale. Empty disables the section."
+        },
+        {
+          "key": "ui.sidebar.panel.title",
+          "type": "string",
+          "default": "\"panel\"",
+          "description": "Title row of the sidebar panel section."
+        },
+        {
+          "key": "ui.sidebar.panel.rows",
+          "type": "integer",
+          "default": "12",
+          "description": "Body rows of the sidebar panel section; the section adds a separator and a title row."
+        },
+        {
+          "key": "ui.sidebar.panel.interval_seconds",
+          "type": "integer",
+          "default": "5",
+          "description": "Seconds between sidebar panel command runs."
+        },
+        {
+          "key": "ui.sidebar.panel.timeout_seconds",
+          "type": "integer",
+          "default": "5",
+          "description": "Seconds before a sidebar panel command run is stopped and counted as failed."
+        },
+        {
+          "key": "ui.sidebar.panel.click_command",
+          "type": "string",
+          "default": "\"\"",
+          "description": "Command a left click on the sidebar panel runs in a popup, with HERDR_PANEL_COLUMN and HERDR_PANEL_LINE set to the clicked body cell (0-based), HERDR_PANEL_WIDTH and HERDR_PANEL_HEIGHT to the body size, and the view variables of command. Empty disables clicks."
+        },
+        {
+          "key": "ui.sidebar.panel.click_width",
+          "type": "string",
+          "default": "unset",
+          "description": "Width of the click_command popup, in cells or as a percentage like 80%."
+        },
+        {
+          "key": "ui.sidebar.panel.click_height",
+          "type": "string",
+          "default": "unset",
+          "description": "Height of the click_command popup, in cells or as a percentage like 80%."
+        },
+        {
+          "key": "ui.sidebar.panel.zoom_levels",
+          "type": "integer",
+          "default": "1",
+          "description": "Zoom levels the mouse wheel steps HERDR_PANEL_ZOOM through (0 to zoom_levels - 1; wheel up zooms in). Dragging the section with the left button adds the distance moved to HERDR_PANEL_DRAG_X and HERDR_PANEL_DRAG_Y; a zoom or focused pane change resets the drag."
+        },
+        {
+          "key": "ui.sidebar.panel.zoom",
+          "type": "integer",
+          "default": "0",
+          "description": "Starting HERDR_PANEL_ZOOM of the sidebar panel."
+        },
+        {
           "key": "ui.accent",
           "type": "color",
           "default": "\"cyan\"",

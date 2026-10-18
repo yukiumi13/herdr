@@ -380,6 +380,10 @@ impl App {
             }
         }
 
+        if self.handle_sidebar_panel_mouse(mouse) {
+            return;
+        }
+
         if self.handle_modified_url_click(source_id, mouse) {
             return;
         }

@@ -22,6 +22,7 @@ mod popup;
 mod runtime;
 mod runtime_mutations;
 mod session;
+mod sidebar_panel;
 pub mod state;
 mod tab_bar_status;
 mod terminal_targets;
@@ -146,6 +147,8 @@ pub struct App {
     tab_bar_datetimes: Vec<tab_bar_status::TabBarDatetimeRuntime>,
     tab_bar_commands: Vec<tab_bar_status::TabBarCommandRuntime>,
     next_tab_bar_datetime_refresh: Option<Instant>,
+    sidebar_panel_generation: u64,
+    sidebar_panel: Option<sidebar_panel::SidebarPanelRuntime>,
     /// Parsed `ui.window_title` plus the hostname resolved when it was applied.
     window_title_template: Option<(crate::config::WindowTitleTemplate, String)>,
     pub(crate) persist_pane_history: bool,
@@ -638,6 +641,7 @@ impl App {
             agent_view_override: None,
             sidebar_agents: config.ui.sidebar.agents.clone(),
             sidebar_spaces: config.ui.sidebar.spaces.clone(),
+            sidebar_panel: Default::default(),
             next_agent_state_change_seq: 0,
             mouse_capture: config.ui.mouse_capture,
             copy_on_select: config.ui.copy_on_select,
@@ -781,6 +785,8 @@ impl App {
             tab_bar_datetimes: Vec::new(),
             tab_bar_commands: Vec::new(),
             next_tab_bar_datetime_refresh: None,
+            sidebar_panel_generation: 0,
+            sidebar_panel: None,
             window_title_template: None,
             selection_autoscroll_deadline: None,
             selection_highlight_clear_deadline: None,
@@ -804,6 +810,7 @@ impl App {
             prefix_input_source: Box::new(crate::platform::RealPrefixInputSource::default()),
         };
         app.configure_tab_bar_status(&config.ui.tab_bar_right, &config.ui.tab_bar_right_separator);
+        app.configure_sidebar_panel(&config.ui.sidebar.panel);
         app.configure_window_title(&config.ui.window_title);
         app
     }
@@ -1511,6 +1518,7 @@ impl App {
                 self.state.status_indicators = config.ui.status_indicators;
                 self.state.sidebar_agents = config.ui.sidebar.agents.clone();
                 self.state.sidebar_spaces = config.ui.sidebar.spaces.clone();
+                self.configure_sidebar_panel(&config.ui.sidebar.panel);
                 self.state.agent_panel_scroll = 0;
                 self.state.accent = crate::config::parse_color(&config.ui.accent);
                 if !self.state.local_sound_playback && self.state.sound != config.ui.sound {

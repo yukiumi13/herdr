@@ -69,6 +69,9 @@ impl App {
                 segment_index,
                 result,
             } => self.handle_tab_bar_command_finished(generation, segment_index, result),
+            AppEvent::SidebarPanelCommandFinished { generation, result } => {
+                self.handle_sidebar_panel_command_finished(generation, result)
+            }
             ev @ AppEvent::TerminalBell { .. } => {
                 self.handle_internal_event(ev);
                 false
@@ -163,6 +166,11 @@ impl App {
         } = ev
         {
             let _ = self.handle_tab_bar_command_finished(generation, segment_index, result);
+            return Vec::new();
+        }
+
+        if let AppEvent::SidebarPanelCommandFinished { generation, result } = ev {
+            let _ = self.handle_sidebar_panel_command_finished(generation, result);
             return Vec::new();
         }
 

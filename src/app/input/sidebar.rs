@@ -18,9 +18,25 @@ impl AppState {
         if self.sidebar_collapsed || sidebar.width <= 1 || sidebar.height == 0 {
             return Rect::default();
         }
-        let (_, detail_area) =
-            crate::ui::expanded_sidebar_sections(sidebar, self.sidebar_section_split);
+        let (_, detail_area) = crate::ui::expanded_sidebar_sections(
+            sidebar,
+            self.sidebar_section_split,
+            self.sidebar_panel.rows(),
+        );
         detail_area
+    }
+
+    pub(crate) fn sidebar_panel_rect(&self) -> Rect {
+        let sidebar = self.view.sidebar_rect;
+        if self.sidebar_collapsed || sidebar.width <= 1 || sidebar.height == 0 {
+            return Rect::default();
+        }
+        crate::ui::sidebar_sections(
+            sidebar,
+            self.sidebar_section_split,
+            self.sidebar_panel.rows(),
+        )
+        .1
     }
 
     pub(super) fn workspace_list_scrollbar_target_at(
@@ -233,7 +249,7 @@ impl AppState {
         Rect::new(x, y, menu_w, menu_h)
     }
 
-    pub(super) fn on_sidebar_divider(&self, col: u16, row: u16) -> bool {
+    pub(crate) fn on_sidebar_divider(&self, col: u16, row: u16) -> bool {
         if self.sidebar_collapsed {
             return false;
         }
@@ -473,6 +489,7 @@ impl AppState {
         let (_, detail_area) = crate::ui::expanded_sidebar_sections(
             self.view.sidebar_rect,
             self.sidebar_section_split,
+            self.sidebar_panel.rows(),
         );
         let rect = crate::ui::agent_panel_toggle_rect(detail_area, self.agent_panel_sort);
         rect.width > 0
@@ -855,6 +872,7 @@ mod tests {
         let (_, detail_area) = crate::ui::expanded_sidebar_sections(
             app.state.view.sidebar_rect,
             app.state.sidebar_section_split,
+            0,
         );
         let toggle = crate::ui::agent_panel_toggle_rect(detail_area, app.state.agent_panel_sort);
         app.handle_mouse(mouse(
@@ -901,6 +919,7 @@ mod tests {
         let (_, detail_area) = crate::ui::expanded_sidebar_sections(
             app.state.view.sidebar_rect,
             app.state.sidebar_section_split,
+            0,
         );
         app.handle_mouse(mouse(
             MouseEventKind::Down(MouseButton::Left),
@@ -1314,6 +1333,74 @@ mod tests {
         app.handle_mouse(mouse(MouseEventKind::ScrollDown, list.x + 1, list.y + 1));
 
         assert_eq!(app.state.selected, 2);
+    }
+
+    #[test]
+    fn wheel_over_the_panel_steps_its_zoom_within_the_levels() {
+        let mut app = app_for_mouse_test();
+        app.configure_sidebar_panel(&crate::config::PanelSidebarConfig {
+            command: "true".into(),
+            rows: 6,
+            zoom_levels: 3,
+            zoom: 1,
+            ..Default::default()
+        });
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 40));
+        let panel = app.state.sidebar_panel_rect();
+        assert!(panel.height > 0);
+
+        let zooms: Vec<u8> = [
+            MouseEventKind::ScrollUp,
+            MouseEventKind::ScrollUp,
+            MouseEventKind::ScrollDown,
+            MouseEventKind::ScrollDown,
+            MouseEventKind::ScrollDown,
+        ]
+        .into_iter()
+        .map(|kind| {
+            app.handle_mouse(mouse(kind, panel.x + 1, panel.y + panel.height - 1));
+            app.state.sidebar_panel.zoom
+        })
+        .collect();
+        assert_eq!(zooms, [2, 2, 1, 0, 0]);
+
+        let list = app.state.workspace_list_rect();
+        app.handle_mouse(mouse(MouseEventKind::ScrollUp, list.x + 1, list.y));
+        assert_eq!(app.state.sidebar_panel.zoom, 0);
+    }
+
+    #[test]
+    fn dragging_the_panel_accumulates_its_drag_and_a_still_press_is_a_click() {
+        let mut app = app_for_mouse_test();
+        app.configure_sidebar_panel(&crate::config::PanelSidebarConfig {
+            command: "true".into(),
+            rows: 6,
+            zoom_levels: 3,
+            ..Default::default()
+        });
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 40));
+        let body = crate::ui::sidebar_panel_body_rect(app.state.sidebar_panel_rect());
+        let (x, y) = (body.x + 2, body.y + 2);
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+        app.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), x + 3, y + 1));
+        // Past the panel's edge the drag goes on.
+        app.handle_mouse(mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            x + 40,
+            y - 1,
+        ));
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), x + 40, y - 1));
+        assert_eq!(app.state.sidebar_panel.drag, (40, -1));
+        assert_eq!(app.state.sidebar_panel.press, None);
+        assert!(app.state.drag.is_none());
+
+        // A press released in place leaves the drag alone, and a zoom resets it.
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), x, y));
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), x, y));
+        assert_eq!(app.state.sidebar_panel.drag, (40, -1));
+        app.handle_mouse(mouse(MouseEventKind::ScrollUp, x, y));
+        assert_eq!(app.state.sidebar_panel.drag, (0, 0));
     }
 
     #[test]

@@ -158,6 +158,11 @@ pub enum AppEvent {
         segment_index: usize,
         result: Result<Option<String>, String>,
     },
+    /// The sidebar panel command finished with its raw stdout.
+    SidebarPanelCommandFinished {
+        generation: u64,
+        result: Result<Vec<u8>, String>,
+    },
     /// A plugin action or event command finished.
     PluginCommandFinished {
         log_id: String,

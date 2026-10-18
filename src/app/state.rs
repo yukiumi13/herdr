@@ -1363,6 +1363,48 @@ pub(crate) struct PaneFocusTarget {
     pub pane_id: PaneId,
 }
 
+/// Presentation state of the command-filled sidebar panel (`[ui.sidebar.panel]`).
+#[derive(Debug, Default)]
+pub struct SidebarPanelState {
+    pub config: crate::config::PanelSidebarConfig,
+    /// Body lines from the latest successful command run.
+    pub lines: Vec<ratatui::text::Line<'static>>,
+    /// Body (width, height) from the latest view computation; the command renders for it.
+    pub body_size: (u16, u16),
+    /// Current `HERDR_PANEL_ZOOM`, below `config.zoom_levels`.
+    pub zoom: u8,
+    /// Current `HERDR_PANEL_DRAG_X` and `HERDR_PANEL_DRAG_Y`.
+    pub drag: (i16, i16),
+    /// The left press held on the panel, if any.
+    pub press: Option<SidebarPanelPress>,
+    /// The latest run failed, so `lines` are from an earlier one.
+    pub stale: bool,
+}
+
+/// A left press on the sidebar panel: a press that moves drags the body, one released without
+/// moving is a click at `start`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SidebarPanelPress {
+    pub start: (u16, u16),
+    pub last: (u16, u16),
+    pub moved: bool,
+}
+
+impl SidebarPanelState {
+    pub fn enabled(&self) -> bool {
+        !self.config.command.trim().is_empty() && self.config.rows > 0
+    }
+
+    /// Body rows the sidebar layout reserves; 0 when disabled.
+    pub fn rows(&self) -> u16 {
+        if self.enabled() {
+            self.config.rows
+        } else {
+            0
+        }
+    }
+}
+
 /// All application state — pure data, no channels or async runtime.
 /// Testable without PTYs or a tokio runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1470,6 +1512,7 @@ pub struct AppState {
     pub agent_view_override: Option<crate::api::schema::AgentViewSetParams>,
     pub sidebar_agents: crate::config::AgentsSidebarConfig,
     pub sidebar_spaces: crate::config::SpacesSidebarConfig,
+    pub sidebar_panel: SidebarPanelState,
     pub next_agent_state_change_seq: u64,
     /// Capture mouse input for Herdr's own mouse UI. When false, Herdr only
     /// captures mouse while the focused pane app requests mouse reporting.
@@ -1863,6 +1906,7 @@ impl AppState {
             agent_view_override: None,
             sidebar_agents: crate::config::AgentsSidebarConfig::default(),
             sidebar_spaces: crate::config::SpacesSidebarConfig::default(),
+            sidebar_panel: SidebarPanelState::default(),
             next_agent_state_change_seq: 0,
             mouse_capture: true,
             copy_on_select: true,

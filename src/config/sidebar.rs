@@ -424,11 +424,59 @@ impl Default for SpacesSidebarConfig {
     }
 }
 
+/// A sidebar section between spaces and agents that shows a command's output.
+///
+/// The command runs every `interval_seconds`, and again as soon as the focused pane, the
+/// section size or its view (zoom, drag) changes, with the custom command environment plus
+/// `COLUMNS` and `LINES` set to the body size. Its stdout, including ANSI SGR colors, fills the
+/// body. A left click runs `click_command` in a popup with `HERDR_PANEL_COLUMN` and
+/// `HERDR_PANEL_LINE` set to the clicked body cell (0-based) and `HERDR_PANEL_WIDTH` and
+/// `HERDR_PANEL_HEIGHT` to the body size. Dragging the section with the left button adds the
+/// distance moved to `HERDR_PANEL_DRAG_X` and `HERDR_PANEL_DRAG_Y` (cells, right and down
+/// positive). With `zoom_levels` above 1, the mouse wheel over the section steps
+/// `HERDR_PANEL_ZOOM` within `0..zoom_levels` (up zooms in), starting from `zoom`. Both
+/// commands get the view variables; a zoom or focused pane change resets the drag. After a
+/// failed run the body keeps the previous output and the title shows `stale`. An empty
+/// `command` disables the section.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct PanelSidebarConfig {
+    pub title: String,
+    pub command: String,
+    /// Body rows; the section adds a separator and a title row.
+    pub rows: u16,
+    pub interval_seconds: u64,
+    pub timeout_seconds: u64,
+    pub click_command: String,
+    pub click_width: Option<crate::popup_size::PopupSize>,
+    pub click_height: Option<crate::popup_size::PopupSize>,
+    pub zoom_levels: u8,
+    pub zoom: u8,
+}
+
+impl Default for PanelSidebarConfig {
+    fn default() -> Self {
+        Self {
+            title: "panel".into(),
+            command: String::new(),
+            rows: 12,
+            interval_seconds: 5,
+            timeout_seconds: 5,
+            click_command: String::new(),
+            click_width: None,
+            click_height: None,
+            zoom_levels: 1,
+            zoom: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct SidebarConfig {
     pub agents: AgentsSidebarConfig,
     pub spaces: SpacesSidebarConfig,
+    pub panel: PanelSidebarConfig,
 }
 
 #[cfg(test)]

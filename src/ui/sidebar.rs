@@ -19,6 +19,10 @@ use crate::terminal::TerminalRuntimeRegistry;
 
 const WORKSPACE_SECTION_HEADER_ROWS: u16 = 2;
 const AGENT_PANEL_HEADER_ROWS: u16 = 3;
+/// Separator and title rows above the command panel's body.
+const SIDEBAR_PANEL_HEADER_ROWS: u16 = 2;
+/// Agent rows kept below the command panel before it shrinks.
+const MIN_AGENT_BODY_ROWS: u16 = 4;
 
 pub(crate) struct AgentPanelEntry {
     pub ws_idx: usize,
@@ -56,16 +60,63 @@ fn sidebar_section_heights(total_h: u16, split_ratio: f32) -> (u16, u16) {
     (ws_h, detail_h)
 }
 
-pub(crate) fn expanded_sidebar_sections(area: Rect, split_ratio: f32) -> (Rect, Rect) {
+/// Splits the expanded sidebar into (spaces, command panel, agents).
+///
+/// The panel takes `panel_rows` body rows plus its header from the top of the agents share,
+/// shrinking while the agents would keep fewer than `MIN_AGENT_BODY_ROWS` rows and
+/// disappearing below one body row.
+pub(crate) fn sidebar_sections(
+    area: Rect,
+    split_ratio: f32,
+    panel_rows: u16,
+) -> (Rect, Rect, Rect) {
     let content = Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height);
     if content.width == 0 || content.height == 0 {
-        return (Rect::default(), Rect::default());
+        return (Rect::default(), Rect::default(), Rect::default());
     }
 
     let (ws_h, detail_h) = sidebar_section_heights(content.height, split_ratio);
+    let room = detail_h.saturating_sub(AGENT_PANEL_HEADER_ROWS + MIN_AGENT_BODY_ROWS);
+    let panel_h = if panel_rows == 0 || room <= SIDEBAR_PANEL_HEADER_ROWS {
+        0
+    } else {
+        (panel_rows + SIDEBAR_PANEL_HEADER_ROWS).min(room)
+    };
     let ws_area = Rect::new(content.x, content.y, content.width, ws_h);
-    let detail_area = Rect::new(content.x, content.y + ws_h, content.width, detail_h);
-    (ws_area, detail_area)
+    let panel_area = if panel_h == 0 {
+        Rect::default()
+    } else {
+        Rect::new(content.x, content.y + ws_h, content.width, panel_h)
+    };
+    let agent_area = Rect::new(
+        content.x,
+        content.y + ws_h + panel_h,
+        content.width,
+        detail_h - panel_h,
+    );
+    (ws_area, panel_area, agent_area)
+}
+
+/// Returns (spaces, agents) of the expanded sidebar; see `sidebar_sections`.
+pub(crate) fn expanded_sidebar_sections(
+    area: Rect,
+    split_ratio: f32,
+    panel_rows: u16,
+) -> (Rect, Rect) {
+    let (ws_area, _, agent_area) = sidebar_sections(area, split_ratio, panel_rows);
+    (ws_area, agent_area)
+}
+
+pub(crate) fn sidebar_panel_body_rect(panel: Rect) -> Rect {
+    if panel.height <= SIDEBAR_PANEL_HEADER_ROWS {
+        return Rect::default();
+    }
+    Rect::new(
+        panel.x,
+        panel.y + SIDEBAR_PANEL_HEADER_ROWS,
+        panel.width,
+        panel.height - SIDEBAR_PANEL_HEADER_ROWS,
+    )
 }
 
 pub(crate) fn sidebar_section_divider_rect(area: Rect, split_ratio: f32) -> Rect {
@@ -436,7 +487,7 @@ fn workspace_list_entries_inner(app: &AppState, force_expanded: bool) -> Vec<Wor
 }
 
 pub(crate) fn workspace_list_rect(area: Rect, split_ratio: f32) -> Rect {
-    let (ws_area, _) = expanded_sidebar_sections(area, split_ratio);
+    let (ws_area, _) = expanded_sidebar_sections(area, split_ratio, 0);
     ws_area
 }
 
@@ -1002,9 +1053,11 @@ pub(super) fn render_sidebar(
         buf[(sep_x, y)].set_style(sep_style);
     }
 
-    let (ws_area, detail_area) = expanded_sidebar_sections(area, app.sidebar_section_split);
+    let (ws_area, panel_area, detail_area) =
+        sidebar_sections(area, app.sidebar_section_split, app.sidebar_panel.rows());
 
     render_workspace_list(app, terminal_runtimes, frame, ws_area, is_navigating);
+    render_sidebar_panel(app, frame, panel_area);
     render_agent_detail(app, terminal_runtimes, frame, detail_area);
     render_sidebar_toggle(app, frame, area, false, p);
 }
@@ -1429,6 +1482,51 @@ fn render_workspace_list(
     }
 }
 
+fn render_sidebar_panel(app: &AppState, frame: &mut Frame, area: Rect) {
+    if area.height <= SIDEBAR_PANEL_HEADER_ROWS {
+        return;
+    }
+    let p = &app.palette;
+    let panel = &app.sidebar_panel;
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            "─".repeat(area.width as usize),
+            Style::default().fg(p.surface_dim),
+        )),
+        Rect::new(area.x, area.y, area.width, 1),
+    );
+    let title_row = Rect::new(area.x, area.y + 1, area.width, 1);
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            format!(" {}", panel.config.title),
+            Style::default().fg(p.overlay0).add_modifier(Modifier::BOLD),
+        )),
+        title_row,
+    );
+    // A stale marker, zoom level dots with the current one filled, then the click hint.
+    let mut hints = Vec::new();
+    if panel.stale {
+        hints.push(Span::styled("stale ", Style::default().fg(p.yellow)));
+    }
+    if panel.config.zoom_levels > 1 {
+        let dots: String = (0..panel.config.zoom_levels)
+            .map(|level| if level == panel.zoom { '●' } else { '·' })
+            .collect();
+        hints.push(Span::styled(dots, Style::default().fg(p.overlay0)));
+    }
+    if !panel.config.click_command.trim().is_empty() {
+        hints.push(Span::styled(" [+]", Style::default().fg(p.overlay0)));
+    }
+    frame.render_widget(
+        Paragraph::new(Line::from(hints)).alignment(Alignment::Right),
+        title_row,
+    );
+    frame.render_widget(
+        Paragraph::new(panel.lines.clone()),
+        sidebar_panel_body_rect(area),
+    );
+}
+
 fn render_agent_detail(
     app: &AppState,
     terminal_runtimes: &TerminalRuntimeRegistry,
@@ -1671,7 +1769,8 @@ mod tests {
             .draw(|frame| render_sidebar(&app, &TerminalRuntimeRegistry::new(), frame, area))
             .unwrap();
         let buffer = terminal.backend().buffer();
-        let (_, agent_area) = expanded_sidebar_sections(area, app.sidebar_section_split);
+        let (_, agent_area) =
+            expanded_sidebar_sections(area, app.sidebar_section_split, app.sidebar_panel.rows());
         let body = agent_panel_body_rect(agent_area, false);
 
         let first = row_text(buffer, body.y, 25);
@@ -1722,7 +1821,8 @@ rows = [[{ token = "workspace", bold = false }, { token = "agent", dim = false }
         terminal
             .draw(|frame| render_sidebar(&app, &TerminalRuntimeRegistry::new(), frame, area))
             .unwrap();
-        let (_, agent_area) = expanded_sidebar_sections(area, app.sidebar_section_split);
+        let (_, agent_area) =
+            expanded_sidebar_sections(area, app.sidebar_section_split, app.sidebar_panel.rows());
         let body = agent_panel_body_rect(agent_area, false);
         let buffer = terminal.backend().buffer();
         let workspace = buffer[(find_symbol_x(buffer, body.y, body.width, "o"), body.y)].style();
@@ -2013,7 +2113,8 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
             .draw(|frame| render_sidebar(&app, &TerminalRuntimeRegistry::new(), frame, area))
             .unwrap();
         let buffer = terminal.backend().buffer();
-        let (_, agent_area) = expanded_sidebar_sections(area, app.sidebar_section_split);
+        let (_, agent_area) =
+            expanded_sidebar_sections(area, app.sidebar_section_split, app.sidebar_panel.rows());
         let body = agent_panel_body_rect(agent_area, false);
         let first = row_text(buffer, body.y, 17);
 
@@ -2043,7 +2144,8 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         renderer
             .draw(|frame| render_sidebar(&app, &TerminalRuntimeRegistry::new(), frame, area))
             .unwrap();
-        let (_, agent_area) = expanded_sidebar_sections(area, app.sidebar_section_split);
+        let (_, agent_area) =
+            expanded_sidebar_sections(area, app.sidebar_section_split, app.sidebar_panel.rows());
         let body = agent_panel_body_rect(agent_area, false);
         let rendered = row_text(renderer.backend().buffer(), body.y, 9);
 
@@ -2631,8 +2733,33 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
     }
 
     #[test]
+    fn sidebar_panel_takes_rows_from_the_agents_share_and_yields_when_short() {
+        // Half of the 44 rows goes to spaces; the panel is 12 body rows plus its header.
+        let (ws, panel, agents) = sidebar_sections(Rect::new(0, 0, 26, 44), 0.5, 12);
+        assert_eq!((ws.y, ws.height), (0, 22));
+        assert_eq!((panel.y, panel.height), (22, 14));
+        assert_eq!((agents.y, agents.height), (36, 8));
+        assert_eq!(sidebar_panel_body_rect(panel), Rect::new(0, 24, 25, 12));
+
+        // Short sidebar: the panel shrinks so the agents keep their header and body rows.
+        let (_, panel, agents) = sidebar_sections(Rect::new(0, 0, 26, 24), 0.5, 12);
+        assert_eq!(
+            panel.height,
+            12 - AGENT_PANEL_HEADER_ROWS - MIN_AGENT_BODY_ROWS
+        );
+        assert_eq!(agents.height, AGENT_PANEL_HEADER_ROWS + MIN_AGENT_BODY_ROWS);
+
+        // Too short for one body row, or disabled: no panel and the agents keep their share.
+        for (height, rows) in [(18, 12), (40, 0)] {
+            let (_, panel, agents) = sidebar_sections(Rect::new(0, 0, 26, height), 0.5, rows);
+            assert_eq!(panel, Rect::default());
+            assert_eq!(agents.height, height - height / 2);
+        }
+    }
+
+    #[test]
     fn expanded_sidebar_sections_handle_tiny_heights() {
-        let (ws_area, detail_area) = expanded_sidebar_sections(Rect::new(0, 0, 20, 5), 0.9);
+        let (ws_area, detail_area) = expanded_sidebar_sections(Rect::new(0, 0, 20, 5), 0.9, 0);
 
         assert_eq!(ws_area, Rect::new(0, 0, 19, 3));
         assert_eq!(detail_area, Rect::new(0, 3, 19, 2));

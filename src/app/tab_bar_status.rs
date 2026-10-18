@@ -33,10 +33,9 @@ pub(super) struct TabBarCommandRuntime {
 impl Drop for TabBarCommandRuntime {
     fn drop(&mut self) {
         if let Some(task) = self.task.take() {
-            task.abort_handle.abort();
             // Kill the process group on the reconfiguring thread instead of waiting
             // for Tokio to schedule cancellation of the command task.
-            task.control.terminate();
+            task.cancel();
         }
     }
 }
@@ -124,6 +123,7 @@ impl App {
 
     pub(crate) fn handle_tab_bar_status_tasks(&mut self, now: std::time::Instant) -> bool {
         let mut changed = false;
+        self.handle_sidebar_panel_tasks(now);
 
         if self
             .next_tab_bar_datetime_refresh
@@ -176,6 +176,7 @@ impl App {
             .filter(|runtime| runtime.task.is_none())
             .map(|runtime| runtime.next_run_at)
             .chain(self.next_tab_bar_datetime_refresh)
+            .chain(self.next_sidebar_panel_deadline())
             .min()
     }
 
@@ -248,7 +249,7 @@ fn sanitize_status_text(value: &str) -> Option<String> {
     (!value.is_empty()).then_some(value)
 }
 
-fn is_unicode_format_control(character: char) -> bool {
+pub(super) fn is_unicode_format_control(character: char) -> bool {
     matches!(
         character,
         '\u{00ad}'
@@ -313,9 +314,41 @@ async fn read_last_output_line(
     })
 }
 
-struct StatusCommandTask {
+/// Reads stdout up to `limit` bytes and drains the rest so the command never blocks.
+async fn read_whole_output(
+    mut stdout: tokio::process::ChildStdout,
+    limit: usize,
+) -> std::io::Result<Vec<u8>> {
+    let mut output = Vec::new();
+    let mut buffer = [0_u8; 4096];
+    loop {
+        let count = stdout.read(&mut buffer).await?;
+        if count == 0 {
+            return Ok(output);
+        }
+        let room = limit.saturating_sub(output.len());
+        output.extend_from_slice(&buffer[..count.min(room)]);
+    }
+}
+
+/// Which part of a status command's stdout its result carries.
+#[derive(Clone, Copy)]
+pub(super) enum StatusOutput {
+    LastLine,
+    Whole { limit: usize },
+}
+
+pub(super) struct StatusCommandTask {
     abort_handle: tokio::task::AbortHandle,
     control: Arc<StatusCommandControl>,
+}
+
+impl StatusCommandTask {
+    /// Aborts the task and kills its process group on the calling thread.
+    pub(super) fn cancel(self) {
+        self.abort_handle.abort();
+        self.control.terminate();
+    }
 }
 
 struct StatusCommandControl {
@@ -362,6 +395,31 @@ fn spawn_status_command(
     environment: Vec<(String, String)>,
     cwd: Option<std::path::PathBuf>,
 ) -> StatusCommandTask {
+    spawn_output_command(
+        event_tx,
+        command,
+        timeout,
+        environment,
+        cwd,
+        StatusOutput::LastLine,
+        move |result| crate::events::AppEvent::TabBarCommandFinished {
+            generation,
+            segment_index,
+            result: result.map(|output| command_output_text(&output)),
+        },
+    )
+}
+
+/// Runs a status command in the background and sends `finished(result)` as an app event.
+pub(super) fn spawn_output_command(
+    event_tx: tokio::sync::mpsc::Sender<crate::events::AppEvent>,
+    command: String,
+    timeout: Duration,
+    environment: Vec<(String, String)>,
+    cwd: Option<std::path::PathBuf>,
+    output: StatusOutput,
+    finished: impl FnOnce(Result<Vec<u8>, String>) -> crate::events::AppEvent + Send + 'static,
+) -> StatusCommandTask {
     let control = Arc::new(StatusCommandControl {
         terminated: AtomicBool::new(false),
         process_group: Mutex::new(None),
@@ -376,16 +434,11 @@ fn spawn_status_command(
             deadline,
             environment,
             cwd,
+            output,
         )
         .await;
         task_control.terminate();
-        let _ = event_tx
-            .send(crate::events::AppEvent::TabBarCommandFinished {
-                generation,
-                segment_index,
-                result,
-            })
-            .await;
+        let _ = event_tx.send(finished(result)).await;
     });
     StatusCommandTask {
         abort_handle: task.abort_handle(),
@@ -400,7 +453,8 @@ async fn run_status_command(
     deadline: tokio::time::Instant,
     environment: Vec<(String, String)>,
     cwd: Option<std::path::PathBuf>,
-) -> Result<Option<String>, String> {
+    output: StatusOutput,
+) -> Result<Vec<u8>, String> {
     if control.is_terminated() || tokio::time::Instant::now() >= deadline {
         return Err(format!("timed out after {}s", timeout.as_secs()));
     }
@@ -432,13 +486,16 @@ async fn run_status_command(
             let Some(stdout) = stdout else {
                 return std::io::Result::Ok(Vec::new());
             };
-            read_last_output_line(stdout).await
+            match output {
+                StatusOutput::LastLine => read_last_output_line(stdout).await,
+                StatusOutput::Whole { limit } => read_whole_output(stdout, limit).await,
+            }
         };
         let (status, output) = tokio::join!(child.wait(), read_output);
         let status = status.map_err(|error| error.to_string())?;
         let output = output.map_err(|error| error.to_string())?;
         if status.success() {
-            Ok(command_output_text(&output))
+            Ok(output)
         } else {
             Err(format!("exited with {status}"))
         }
