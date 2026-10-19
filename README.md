@@ -1,3 +1,8 @@
+> **Minimap fork — Linux alpha.** This `pr-minimap` branch adds a command sidebar panel
+> between Spaces and Agents. [Setup and update policy](docs/next/minimap-fork.md) ·
+> [PR Map tool and fictional demo](https://github.com/yukiumi13/pr-map).
+> Official self-update is disabled in this fork. The upstream Herdr project is linked below.
+
 # herdr
 
 

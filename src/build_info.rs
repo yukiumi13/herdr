@@ -3,11 +3,11 @@
 pub const BASE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub fn channel() -> &'static str {
-    non_empty(option_env!("HERDR_BUILD_CHANNEL")).unwrap_or("stable")
+    "minimap"
 }
 
 pub fn build_id() -> Option<&'static str> {
-    non_empty(option_env!("HERDR_BUILD_ID"))
+    non_empty(option_env!("HERDR_BUILD_ID")).or(Some("alpha1"))
 }
 
 pub fn version() -> String {
@@ -34,6 +34,13 @@ fn non_empty(value: Option<&'static str>) -> Option<&'static str> {
         }
     })
 }
+
+/// This independently distributed fork uses manual source/binary updates.
+pub fn is_minimap_fork() -> bool {
+    true
+}
+
+pub const FORK_UPDATE_GUIDANCE: &str = "This is the Herdr minimap fork. Official self-update is disabled to preserve sidebar support. Update from https://github.com/yukiumi13/herdr/tree/pr-minimap and rebuild, or install a fork release. To return to official Herdr, install it separately from herdr.dev.";
 
 #[cfg(test)]
 mod tests {
