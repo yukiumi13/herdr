@@ -1366,6 +1366,10 @@ pub(crate) struct PaneFocusTarget {
 /// Presentation state of the command-filled sidebar panel (`[ui.sidebar.panel]`).
 #[derive(Debug, Default)]
 pub struct SidebarPanelState {
+    /// Provider frame accepted with the displayed lines; retained when refresh fails.
+    pub frame_id: Option<String>,
+    /// Geometry for which that accepted frame was rendered.
+    pub frame_size: (u16, u16),
     pub config: crate::config::PanelSidebarConfig,
     /// Body lines from the latest successful command run.
     pub lines: Vec<ratatui::text::Line<'static>>,

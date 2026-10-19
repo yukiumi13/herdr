@@ -843,7 +843,7 @@
           "key": "ui.sidebar.panel.command",
           "type": "string",
           "default": "\"\"",
-          "description": "Command whose stdout, including ANSI SGR colors, fills a sidebar section between Spaces and Agents. It runs every interval_seconds and again when the focused pane, the section size, zoom or drag changes, with COLUMNS and LINES set to the body size and HERDR_PANEL_ZOOM, HERDR_PANEL_DRAG_X and HERDR_PANEL_DRAG_Y to the view. After a failed run the body keeps the previous output and the title shows stale. Empty disables the section."
+          "description": "Command whose stdout, including ANSI SGR colors, fills a sidebar section between Spaces and Agents. It runs every interval_seconds and again when the focused pane, the section size, zoom or drag changes, with a unique HERDR_PANEL_FRAME_ID for each command result, COLUMNS and LINES set to the body size and HERDR_PANEL_ZOOM, HERDR_PANEL_DRAG_X and HERDR_PANEL_DRAG_Y to the view. After a failed run the body keeps the previous output and the title shows stale. Empty disables the section."
         },
         {
           "key": "ui.sidebar.panel.title",
@@ -873,7 +873,7 @@
           "key": "ui.sidebar.panel.click_command",
           "type": "string",
           "default": "\"\"",
-          "description": "Command a left click on the sidebar panel runs in a popup, with HERDR_PANEL_COLUMN and HERDR_PANEL_LINE set to the clicked body cell (0-based), HERDR_PANEL_WIDTH and HERDR_PANEL_HEIGHT to the body size, and the view variables of command. Empty disables clicks."
+          "description": "Command a left click on the sidebar panel runs in a popup, with HERDR_PANEL_COLUMN and HERDR_PANEL_LINE set to the clicked body cell (0-based), HERDR_PANEL_WIDTH and HERDR_PANEL_HEIGHT to the body size, and the view variables of command. HERDR_PANEL_FRAME_ID identifies the successfully displayed command result, so providers can resolve clicks against immutable frame data. After resizing, click coordinates are omitted until a matching frame is accepted. Empty disables clicks."
         },
         {
           "key": "ui.sidebar.panel.click_width",

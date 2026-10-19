@@ -29,6 +29,9 @@ pub(super) struct SidebarPanelRuntime {
     /// Inputs of the last run; a change reruns at once.
     last_inputs: Option<PanelInputs>,
     task: Option<StatusCommandTask>,
+    frame_namespace: String,
+    next_frame: u64,
+    pending_frame: Option<(String, (u16, u16))>,
 }
 
 impl Drop for SidebarPanelRuntime {
@@ -44,6 +47,8 @@ impl App {
         self.sidebar_panel_generation = self.sidebar_panel_generation.wrapping_add(1);
         self.state.sidebar_panel.config = config.clone();
         self.state.sidebar_panel.lines.clear();
+        self.state.sidebar_panel.frame_id = None;
+        self.state.sidebar_panel.frame_size = (0, 0);
         self.state.sidebar_panel.zoom = config.zoom.min(config.zoom_levels.saturating_sub(1));
         self.state.sidebar_panel.drag = (0, 0);
         self.state.sidebar_panel.press = None;
@@ -61,6 +66,17 @@ impl App {
             next_run_at: Instant::now(),
             last_inputs: None,
             task: None,
+            frame_namespace: format!(
+                "{}-{}-{}",
+                std::process::id(),
+                self.sidebar_panel_generation,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            ),
+            next_frame: 0,
+            pending_frame: None,
         });
     }
 
@@ -100,6 +116,10 @@ impl App {
         if now < runtime.next_run_at && runtime.last_inputs.as_ref() == Some(&inputs) {
             return;
         }
+        runtime.next_frame = runtime.next_frame.wrapping_add(1);
+        let frame_id = format!("{}-{}", runtime.frame_namespace, runtime.next_frame);
+        environment.push(("HERDR_PANEL_FRAME_ID".into(), frame_id.clone()));
+        runtime.pending_frame = Some((frame_id, size));
         environment.extend(panel_view_env(panel));
         environment.push(("COLUMNS".into(), size.0.to_string()));
         environment.push(("LINES".into(), size.1.to_string()));
@@ -152,12 +172,17 @@ impl App {
         let was_stale = std::mem::replace(&mut panel.stale, result.is_err());
         match result {
             Ok(output) => {
+                if let Some((id, size)) = runtime.pending_frame.take() {
+                    panel.frame_id = Some(id);
+                    panel.frame_size = size;
+                }
                 let lines = parse_sgr_lines(&output, usize::from(panel.config.rows));
                 let changed = lines != panel.lines || was_stale;
                 panel.lines = lines;
                 changed
             }
             Err(error) => {
+                runtime.pending_frame = None;
                 tracing::warn!(command = %runtime.command, error, "sidebar panel command failed");
                 !was_stale
             }
@@ -237,8 +262,14 @@ impl App {
         let view = panel_view_env(panel);
         let (mut environment, _) = self.custom_command_env();
         environment.extend(view);
+        environment.push(("HERDR_PANEL_FRAME_ID".into(), String::new()));
         let body = crate::ui::sidebar_panel_body_rect(self.state.sidebar_panel_rect());
-        if body.contains(ratatui::layout::Position::new(at.0, at.1)) {
+        if body.contains(ratatui::layout::Position::new(at.0, at.1))
+            && panel.frame_size == (body.width, body.height)
+        {
+            if let Some(id) = &panel.frame_id {
+                environment.push(("HERDR_PANEL_FRAME_ID".into(), id.clone()));
+            }
             environment.push(("HERDR_PANEL_COLUMN".into(), (at.0 - body.x).to_string()));
             environment.push(("HERDR_PANEL_LINE".into(), (at.1 - body.y).to_string()));
             environment.push(("HERDR_PANEL_WIDTH".into(), body.width.to_string()));
@@ -438,6 +469,45 @@ mod tests {
         assert!(!app.handle_sidebar_panel_command_finished(generation, Err("exit 1".into())));
         assert!(app.handle_sidebar_panel_command_finished(generation, Ok(b"map".to_vec())));
         assert!(!app.state.sidebar_panel.stale);
+    }
+
+    #[tokio::test]
+    async fn accepted_frame_is_retained_when_a_later_command_fails() {
+        let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &crate::config::Config::default(),
+            true,
+            None,
+            rx,
+            crate::api::EventHub::default(),
+        );
+        app.configure_sidebar_panel(&PanelSidebarConfig {
+            command: "true".into(),
+            ..Default::default()
+        });
+        let generation = app.sidebar_panel_generation;
+        let runtime = app.sidebar_panel.as_mut().expect("configured panel");
+        runtime.pending_frame = Some(("producer-1".into(), (25, 12)));
+        app.handle_sidebar_panel_command_finished(generation, Ok(b"frame one".to_vec()));
+        assert_eq!(
+            app.state.sidebar_panel.frame_id.as_deref(),
+            Some("producer-1")
+        );
+        assert_eq!(app.state.sidebar_panel.frame_size, (25, 12));
+        app.sidebar_panel
+            .as_mut()
+            .expect("configured panel")
+            .pending_frame = Some(("producer-2".into(), (30, 15)));
+        app.handle_sidebar_panel_command_finished(generation, Err("timeout".into()));
+        assert_eq!(
+            app.state.sidebar_panel.frame_id.as_deref(),
+            Some("producer-1")
+        );
+        assert_eq!(app.state.sidebar_panel.frame_size, (25, 12));
+        assert_eq!(
+            app.state.sidebar_panel.lines[0].spans[0].content,
+            "frame one"
+        );
     }
 
     #[test]
